@@ -702,6 +702,14 @@ public final class ManifestLoader: ManifestLoaderProtocol {
         }
     }
 
+    /// Variant of popen() that specifies working directory.
+    @discardableResult
+    static func popen(arguments: [String], environment: [String: String], workingDirectory: AbsolutePath) throws -> ProcessResult {
+        let process = Process(arguments: arguments, environment: environment, workingDirectory: workingDirectory, outputRedirection: .collect)
+        try process.launch()
+        return try process.waitUntilExit()
+    }
+
     /// Parse the manifest at the given path to JSON.
     fileprivate func parse(
         packageIdentity: PackageIdentity,
@@ -848,7 +856,10 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                 let windowsPathComponent = runtimePath.pathString.replacingOccurrences(of: "/", with: "\\")
                 environment["Path"] = "\(windowsPathComponent);\(environment["Path"] ?? "")"
 #endif
-                let runResult = try Process.popen(arguments: cmd, environment: environment)
+                // Set working directory to location of the manifest in file system to enable access to its sources.
+                let packageRoot = manifestPath.parentDirectory
+                environment["SWIFT_PACKAGE_ROOT"] = packageRoot.pathString
+                let runResult = try Self.popen(arguments: cmd, environment: environment, workingDirectory: packageRoot)
                 fclose(jsonOutputFileDesc)
                 let runOutput = try (runResult.utf8Output() + runResult.utf8stderrOutput()).spm_chuzzle()
                 if let runOutput = runOutput {
