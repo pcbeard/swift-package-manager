@@ -702,12 +702,16 @@ public final class ManifestLoader: ManifestLoaderProtocol {
         }
     }
 
-    /// Variant of popen() that specifies working directory.
+    /// Variant of popen() that specifies working directory on platforms that support it.
     @discardableResult
     static func popen(arguments: [String], environment: [String: String], workingDirectory: AbsolutePath) throws -> ProcessResult {
+    #if os(macOS)
         let process = Process(arguments: arguments, environment: environment, workingDirectory: workingDirectory, outputRedirection: .collect)
         try process.launch()
         return try process.waitUntilExit()
+    #else
+        return try Process.popen(arguments: arguments, environment: environment)
+    #endif
     }
 
     /// Parse the manifest at the given path to JSON.
@@ -802,8 +806,6 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                 manifestParseResult.diagnosticFile = diagnosticFile
             }
 
-            cmd += [manifestPath.pathString]
-
             cmd += self.extraManifestFlags
 
             try withTemporaryDirectory(removeTreeOnDeinit: true) { tmpDir in
@@ -815,6 +817,25 @@ public final class ManifestLoader: ManifestLoaderProtocol {
 #endif
                 let compiledManifestFile = tmpDir.appending(component: "\(packageIdentity)-manifest\(executableSuffix)")
                 cmd += ["-o", compiledManifestFile.pathString]
+
+                #if os(macOS)
+                // on macOS posix_spawn() will set the current directory.
+                cmd += [manifestPath.pathString]
+                #else
+                // on other platforms add preamble that adjusts process working directory.
+                let temporaryManifest = """
+                    import class Foundation.FileManager
+                    import class Foundation.ProcessInfo
+                    do {
+                        if let packageRoot = ProcessInfo.processInfo.environment["SWIFT_PACKAGE_ROOT"] {
+                            FileManager.default.changeCurrentDirectoryPath(packageRoot)
+                        }
+                    }   
+                    """ + (try String(contentsOf: URL(fileURLWithPath: manifestPath.pathString), encoding: .utf8))
+                let temporaryManifestPath = tmpDir.appending(component: "\(packageIdentity)-manifest.swift").pathString
+                try temporaryManifest.write(to: URL(fileURLWithPath: temporaryManifestPath), atomically: false, encoding: .utf8)
+                cmd += [temporaryManifestPath]
+                #endif
 
                 // Compile the manifest.
                 let compilerResult = try Process.popen(arguments: cmd)
@@ -856,7 +877,8 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                 let windowsPathComponent = runtimePath.pathString.replacingOccurrences(of: "/", with: "\\")
                 environment["Path"] = "\(windowsPathComponent);\(environment["Path"] ?? "")"
 #endif
-                // Set working directory to location of the manifest in file system to enable access to its sources.
+                // Pass package root directory in SWIFT_PACKAGE_ROOT environment variable. This will be used
+                // by the preamble above, on platforms that don't support equivalent of macOS's `posix_spawn()`.
                 let packageRoot = manifestPath.parentDirectory
                 environment["SWIFT_PACKAGE_ROOT"] = packageRoot.pathString
                 let runResult = try Self.popen(arguments: cmd, environment: environment, workingDirectory: packageRoot)
