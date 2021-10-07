@@ -848,6 +848,8 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                 let windowsPathComponent = runtimePath.pathString.replacingOccurrences(of: "/", with: "\\")
                 environment["Path"] = "\(windowsPathComponent);\(environment["Path"] ?? "")"
 #endif
+                // Set working directory to location of the manifest in file system to enable access to its sources.
+                environment["SWIFT_PACKAGE_ROOT"] = manifestPath.parentDirectory.pathString
                 let runResult = try Process.popen(arguments: cmd, environment: environment)
                 fclose(jsonOutputFileDesc)
                 let runOutput = try (runResult.utf8Output() + runResult.utf8stderrOutput()).spm_chuzzle()
