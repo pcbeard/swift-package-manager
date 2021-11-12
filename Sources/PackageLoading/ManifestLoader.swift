@@ -556,7 +556,8 @@ public final class ManifestLoader: ManifestLoaderProtocol {
             manifestPath: key.manifestPath,
             manifestContents: key.manifestContents,
             toolsVersion: key.toolsVersion,
-            delegateQueue: delegateQueue
+            delegateQueue: delegateQueue,
+            observabilityScope: observabilityScope
         )
 
         // only cache successfully parsed manifests
@@ -665,7 +666,8 @@ public final class ManifestLoader: ManifestLoaderProtocol {
         manifestPath: AbsolutePath,
         manifestContents: [UInt8],
         toolsVersion: ToolsVersion,
-        delegateQueue: DispatchQueue
+        delegateQueue: DispatchQueue,
+        observabilityScope: ObservabilityScope
     ) -> EvaluationResult {
 
         var result = EvaluationResult()
@@ -676,6 +678,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                     packageIdentity: packageIdentity,
                     toolsVersion: toolsVersion,
                     delegateQueue:  delegateQueue,
+                    observabilityScope: observabilityScope,
                     result: &result
                 )
             } else {
@@ -686,6 +689,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                         packageIdentity: packageIdentity,
                         toolsVersion: toolsVersion,
                         delegateQueue: delegateQueue,
+                        observabilityScope: observabilityScope,
                         result: &result
                     )
                 }
@@ -704,6 +708,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
         packageIdentity: PackageIdentity,
         toolsVersion: ToolsVersion,
         delegateQueue: DispatchQueue,
+        observabilityScope: ObservabilityScope,
         result: inout EvaluationResult
     ) throws {
         delegateQueue.async {
@@ -845,6 +850,9 @@ public final class ManifestLoader: ManifestLoaderProtocol {
             let windowsPathComponent = runtimePath.pathString.replacingOccurrences(of: "/", with: "\\")
             environment["Path"] = "\(windowsPathComponent);\(environment["Path"] ?? "")"
 #endif
+
+            observabilityScope.emit(.debug("Executing manifest: cmd = \(cmd), environment = \(environment)"))
+            
             let runResult = try Process.popen(arguments: cmd, environment: environment)
             fclose(jsonOutputFileDesc)
             let runOutput = try (runResult.utf8Output() + runResult.utf8stderrOutput()).spm_chuzzle()
@@ -852,6 +860,8 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                 // Append the runtime output to any compiler output we've received.
                 result.compilerOutput = (result.compilerOutput ?? "") + runOutput
             }
+
+            observabilityScope.emit(.debug("Manifest command exitStatus = \(runResult.exitStatus)"))
 
             // Return now if there was an error.
             if runResult.exitStatus != .terminated(code: 0) {
